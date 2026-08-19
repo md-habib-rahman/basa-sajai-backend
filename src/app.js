@@ -40,6 +40,14 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date() });
 });
 
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "Welcome to the Basa Sajai API",
+    timestamp: new Date(),
+  });
+});
+
 // 6. Global Error Middleware
 app.use((err, req, res, next) => {
   console.error("❌ Server Error:", err.stack);
