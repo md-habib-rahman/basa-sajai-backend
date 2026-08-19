@@ -1,0 +1,24 @@
+{
+  "name": "basa-sajai-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/server.js",
+ "scripts": {
+  "build": "prisma generate",
+  "start": "node src/server.js",
+  "dev": "nodemon src/server.js"
+},
+  "dependencies": {
+    "@better-auth/prisma-adapter": "^1.6.29",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "better-auth": "^1.6.29",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "prisma": "^7.9.1"
+  }
+}
