@@ -20,9 +20,7 @@ app.use(
 );
 
 // 2. Better Auth Catch-All Handler
-app.use("/api/auth", (req, res) => {
-  return toNodeHandler(auth)(req, res);
-});
+app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // 3. Body Parsers (For standard API routes)
 app.use(express.json());
