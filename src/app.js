@@ -19,6 +19,15 @@ app.use(
   }),
 );
 
+app.all("/api/auth-test", (req, res) => {
+  res.json({
+    message: "Express auth test route works",
+    method: req.method,
+    path: req.path,
+    originalUrl: req.originalUrl,
+  });
+});
+
 // 2. Better Auth Catch-All Handler
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
