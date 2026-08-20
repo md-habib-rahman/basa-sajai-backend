@@ -8,7 +8,7 @@ export const auth = betterAuth({
     provider: "postgresql",
   }),
   secret: config.authSecret,
-  baseURL: `${config.authUrl}/api/auth`,
+  baseURL: config.authUrl,
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID,
