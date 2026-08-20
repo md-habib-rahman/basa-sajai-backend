@@ -10,7 +10,7 @@ import userRoutes from "./modules/users/users.routes.js";
 import roiRoutes from "./modules/roi/roi.routes.js";
 
 const app = express();
-
+app.set('trust proxy', 1);
 // 1. CORS Configuration (Allows cookies/headers from Vite frontend)
 app.use(
   cors({

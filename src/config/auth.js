@@ -40,11 +40,23 @@ export const auth = betterAuth({
   },
   trustedOrigins: [config.frontendUrl],
   advanced: {
-    disableOriginCheck: config.nodeEnv !== "production",
+    
     useSecureCookies: true,
-  },
-  defaultCookieAttributes: {
-    sameSite: "none",
-    secure: true,
+    cookies: {
+      state: {
+        attributes: {
+          sameSite: "none",
+          secure: true,
+          httpOnly: true,
+        },
+      },
+      session_token: {
+        attributes: {
+          sameSite: "none",
+          secure: true,
+          httpOnly: true,
+        },
+      },
+    },
   },
 });
