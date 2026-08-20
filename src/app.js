@@ -29,7 +29,23 @@ app.all("/api/auth-test", (req, res) => {
 });
 
 // 2. Better Auth Catch-All Handler
-app.all("/api/auth/{*splat}", toNodeHandler(auth));
+const authHandler = toNodeHandler(auth);
+
+app.all("/api/auth/{*splat}", async (req, res, next) => {
+  console.log("🔐 Better Auth request received:", {
+    method: req.method,
+    url: req.url,
+    originalUrl: req.originalUrl,
+    path: req.path,
+  });
+
+  try {
+    return authHandler(req, res);
+  } catch (error) {
+    console.error("🔴 Better Auth handler error:", error);
+    return next(error);
+  }
+});
 
 // 3. Body Parsers (For standard API routes)
 app.use(express.json());
