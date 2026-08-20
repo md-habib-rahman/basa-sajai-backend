@@ -41,6 +41,6 @@ export const auth = betterAuth({
   trustedOrigins: [config.frontendUrl],
   advanced: {
     disableOriginCheck: config.nodeEnv !== "production",
-    useSecureCookies: false,
+    // useSecureCookies: false,
   },
 });
