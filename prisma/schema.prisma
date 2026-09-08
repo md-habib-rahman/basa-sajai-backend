@@ -18,18 +18,17 @@ enum Role {
 }
 
 model User {
-    id            String       @id @default(cuid())
+    id            String    @id @default(cuid())
     name          String
-    email         String       @unique
-    emailVerified Boolean      @default(false)
+    email         String    @unique
+    emailVerified Boolean   @default(false)
     image         String?
-    role          Role         @default(MODERATOR)
-    isActive      Boolean      @default(false) // Deactivated by default
-    createdAt     DateTime     @default(now())
-    updatedAt     DateTime     @updatedAt
+    role          Role      @default(MODERATOR)
+    isActive      Boolean   @default(false) // Deactivated by default
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
     sessions      Session[]
     accounts      Account[]
-   
 }
 
 model Session {
@@ -93,8 +92,6 @@ model Product {
     updatedAt          DateTime        @updatedAt
     productCosting     ProductCosting?
     orderItems         OrderItem[]
-
-    
 }
 
 model ProductCosting {
@@ -112,24 +109,24 @@ model ProductCosting {
 }
 
 enum PurchaserType {
-  JOINT
-  HABIB
-  ROBIUL
+    JOINT
+    HABIB
+    ROBIUL
 }
 
 model Investment {
-  id                 String        @id @default(cuid())
-  investmentDate     DateTime      @default(now())
-  description        String
-  purchaser          PurchaserType @default(JOINT)
-  totalCost          Float         @default(0)
-  habibContribution  Float         @default(0)
-  robiulContribution Float         @default(0)
-  notes              String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+    id                 String        @id @default(cuid())
+    investmentDate     DateTime      @default(now())
+    description        String
+    purchaser          PurchaserType @default(JOINT)
+    totalCost          Float         @default(0)
+    habibContribution  Float         @default(0)
+    robiulContribution Float         @default(0)
+    notes              String?
+    createdAt          DateTime      @default(now())
+    updatedAt          DateTime      @updatedAt
 
-  @@map("investment")
+    @@map("investment")
 }
 
 enum OrderStatus {
@@ -140,19 +137,39 @@ enum OrderStatus {
     CANCELLED
 }
 
+// model Order {
+//     id              String      @id @default(cuid())
+//     orderNumber     String      @unique
+//     customerName    String
+//     customerPhone   String
+//     shippingAddress String
+//     totalAmount     Float       @default(0)
+//     deliveryFee     Float       @default(0)
+//     discountAmount  Float       @default(0) // <--- ADD THIS FIELD
+//     status          OrderStatus @default(PENDING)
+//     notes           String?
+//     createdAt       DateTime    @default(now())
+//     updatedAt       DateTime    @updatedAt
+
+//     items OrderItem[]
+
+//     @@map("order")
+// }
+
 model Order {
-    id              String      @id @default(cuid())
-    orderNumber     String      @unique
-    customerName    String
-    customerPhone   String
-    shippingAddress String
-    totalAmount     Float       @default(0)
-    deliveryFee     Float       @default(0)
-    discountAmount  Float       @default(0) // <--- ADD THIS FIELD
-    status          OrderStatus @default(PENDING)
-    notes           String?
-    createdAt       DateTime    @default(now())
-    updatedAt       DateTime    @updatedAt
+    id                   String      @id @default(cuid())
+    orderNumber          String      @unique
+    customerName         String
+    customerPhone        String
+    shippingAddress      String
+    totalAmount          Float       @default(0)
+    deliveryFee          Float       @default(0)
+    discountAmount       Float       @default(0)
+    actualReceivedAmount Float? // <--- ADD THIS FIELD (Amount received after courier deductions)
+    status               OrderStatus @default(PENDING)
+    notes                String?
+    createdAt            DateTime    @default(now())
+    updatedAt            DateTime    @updatedAt
 
     items OrderItem[]
 

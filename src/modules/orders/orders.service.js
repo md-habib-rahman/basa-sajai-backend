@@ -40,7 +40,7 @@ export const orderService = {
 
     // const randomHex = Math.random().toString(36).substring(2, 6).toUpperCase();
     const orderNumber = await generateOrderNumber();
-	// console.log(orderNumber)
+    // console.log(orderNumber)
 
     let itemsTotal = 0;
     const preparedItems = [];
@@ -112,10 +112,30 @@ export const orderService = {
     });
   },
 
-  async updateOrderStatus(id, status) {
+  async updateOrder(id, data) {
     return await prisma.order.update({
       where: { id },
-      data: { status },
+      data: {
+        actualReceivedAmount:
+          data.actualReceivedAmount !== undefined &&
+          data.actualReceivedAmount !== ""
+            ? Number(data.actualReceivedAmount)
+            : null,
+      },
+      include: { items: true },
+    });
+  },
+
+  async updateOrderStatus(id, status, actualReceivedAmount) {
+    const updateData = { status };
+    if (actualReceivedAmount !== undefined) {
+      updateData.actualReceivedAmount =
+        actualReceivedAmount !== null ? Number(actualReceivedAmount) : null;
+    }
+
+    return await prisma.order.update({
+      where: { id },
+      data: updateData,
       include: { items: true },
     });
   },

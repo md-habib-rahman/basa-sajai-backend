@@ -21,6 +21,22 @@ export const getOrders = async (req, res, next) => {
   }
 };
 
+// order.controller.js
+export const updateOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, actualReceivedAmount } = req.body;
+    const order = await orderService.updateOrderStatus(
+      id,
+      status,
+      actualReceivedAmount,
+    );
+    res.json({ success: true, data: order });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const createOrder = async (req, res, next) => {
   try {
     const order = await orderService.createOrder(req.body);

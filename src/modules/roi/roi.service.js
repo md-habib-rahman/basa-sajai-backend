@@ -1,4 +1,4 @@
-import { prisma } from '../../config/db.js';
+import { prisma } from "../../config/db.js";
 
 export const roiService = {
   async getDashboardMetrics() {
@@ -24,19 +24,37 @@ export const roiService = {
       },
       where: {
         status: {
-          not: 'CANCELLED',
+          not: "CANCELLED",
         },
       },
     });
 
-    const totalRevenue = orderAgg._sum.totalAmount || 0;
+    const activeOrders = await prisma.order.findMany({
+      where: {
+        status: {
+          not: "CANCELLED",
+        },
+      },
+    });
+
+    const totalRevenue = activeOrders.reduce((acc, order) => {
+      // Use actual received amount if specified; fallback to invoice totalAmount
+      const orderRevenue =
+        order.actualReceivedAmount !== null &&
+        order.actualReceivedAmount !== undefined
+          ? order.actualReceivedAmount
+          : order.totalAmount;
+      return acc + orderRevenue;
+    }, 0);
+
+    // const totalRevenue = orderAgg._sum.totalAmount || 0;
 
     // 3. Delivered Order Items Cost of Goods Sold (COGS)
     const orderItems = await prisma.orderItem.findMany({
       where: {
         order: {
           status: {
-            not: 'CANCELLED',
+            not: "CANCELLED",
           },
         },
       },
@@ -59,7 +77,10 @@ export const roiService = {
     // 5. Profit & ROI Metrics
     const grossProfit = totalRevenue - totalCogs;
     const netProfit = totalRevenue - totalInvestment; // Net profit relative to total capital pool
-    const roiPercentage = totalInvestment > 0 ? ((netProfit / totalInvestment) * 100).toFixed(2) : 0;
+    const roiPercentage =
+      totalInvestment > 0
+        ? ((netProfit / totalInvestment) * 100).toFixed(2)
+        : 0;
 
     // 6. 50/50 Partner Profit Share
     const habibProfitShare = netProfit / 2;
