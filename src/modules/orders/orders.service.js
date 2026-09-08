@@ -126,11 +126,20 @@ export const orderService = {
     });
   },
 
-  async updateOrderStatus(id, status, actualReceivedAmount) {
-    const updateData = { status };
+  async updateOrderStatus(id, { status, actualReceivedAmount }) {
+    const updateData = {};
+
+    // Only update status if provided
+    if (status !== undefined && status !== null) {
+      updateData.status = status;
+    }
+
+    // Handle actualReceivedAmount
     if (actualReceivedAmount !== undefined) {
       updateData.actualReceivedAmount =
-        actualReceivedAmount !== null ? Number(actualReceivedAmount) : null;
+        actualReceivedAmount === "" || actualReceivedAmount === null
+          ? null
+          : Number(actualReceivedAmount);
     }
 
     return await prisma.order.update({
