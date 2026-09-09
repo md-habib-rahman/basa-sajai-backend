@@ -129,12 +129,10 @@ export const orderService = {
   async updateOrderStatus(id, { status, actualReceivedAmount }) {
     const updateData = {};
 
-    // Only update status if provided
     if (status !== undefined && status !== null) {
       updateData.status = status;
     }
 
-    // Handle actualReceivedAmount
     if (actualReceivedAmount !== undefined) {
       updateData.actualReceivedAmount =
         actualReceivedAmount === "" || actualReceivedAmount === null
@@ -142,13 +140,55 @@ export const orderService = {
           : Number(actualReceivedAmount);
     }
 
-    return await prisma.order.update({
+    const updatedOrder = await prisma.order.update({
       where: { id },
       data: updateData,
       include: { items: true },
     });
-  },
 
+    // AUTO-CREDIT / DE-CREDIT LOGIC FOR BANK PAGE
+    const creditAmount =
+      updatedOrder.actualReceivedAmount !== null &&
+      updatedOrder.actualReceivedAmount !== undefined
+        ? updatedOrder.actualReceivedAmount
+        : updatedOrder.totalAmount;
+
+    if (updatedOrder.status === "DELIVERED") {
+      // Upsert Auto-Credit Bank Transaction
+      const existingTx = await prisma.bankTransaction.findFirst({
+        where: { orderId: updatedOrder.id },
+      });
+
+      if (existingTx) {
+        await prisma.bankTransaction.update({
+          where: { id: existingTx.id },
+          data: {
+            amount: creditAmount,
+            description: `Auto-Credit: Order #${updatedOrder.orderNumber} Delivered`,
+            referenceNo: updatedOrder.orderNumber,
+          },
+        });
+      } else {
+        await prisma.bankTransaction.create({
+          data: {
+            orderId: updatedOrder.id,
+            description: `Auto-Credit: Order #${updatedOrder.orderNumber} Delivered`,
+            type: "INFLOW",
+            amount: creditAmount,
+            referenceNo: updatedOrder.orderNumber,
+            notes: `Auto-generated credit upon delivery for customer ${updatedOrder.customerName}`,
+          },
+        });
+      }
+    } else {
+      // If status changed away from DELIVERED, remove auto-credit
+      await prisma.bankTransaction.deleteMany({
+        where: { orderId: updatedOrder.id },
+      });
+    }
+
+    return updatedOrder;
+  },
   async deleteOrder(id) {
     return await prisma.order.delete({ where: { id } });
   },

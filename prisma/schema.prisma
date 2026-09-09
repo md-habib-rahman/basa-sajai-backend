@@ -137,24 +137,27 @@ enum OrderStatus {
     CANCELLED
 }
 
-// model Order {
-//     id              String      @id @default(cuid())
-//     orderNumber     String      @unique
-//     customerName    String
-//     customerPhone   String
-//     shippingAddress String
-//     totalAmount     Float       @default(0)
-//     deliveryFee     Float       @default(0)
-//     discountAmount  Float       @default(0) // <--- ADD THIS FIELD
-//     status          OrderStatus @default(PENDING)
-//     notes           String?
-//     createdAt       DateTime    @default(now())
-//     updatedAt       DateTime    @updatedAt
+enum TransactionType {
+    INFLOW // Deposits / Credit
+    OUTFLOW // Withdrawals / Debit
+}
 
-//     items OrderItem[]
+model BankTransaction {
+    id              String          @id @default(cuid())
+    transactionDate DateTime        @default(now())
+    description     String
+    type            TransactionType @default(INFLOW)
+    amount          Float           @default(0)
+    referenceNo     String? // e.g. Order # or Bank Reference
+    orderId         String? // Links auto-credited transactions to Orders
+    notes           String?
+    createdAt       DateTime        @default(now())
+    updatedAt       DateTime        @updatedAt
 
-//     @@map("order")
-// }
+    order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+    @@map("bank_transaction")
+}
 
 model Order {
     id                   String      @id @default(cuid())
@@ -171,7 +174,8 @@ model Order {
     createdAt            DateTime    @default(now())
     updatedAt            DateTime    @updatedAt
 
-    items OrderItem[]
+    items            OrderItem[]
+    bankTransactions BankTransaction[]
 
     @@map("order")
 }
