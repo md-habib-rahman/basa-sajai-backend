@@ -113,16 +113,129 @@ export const orderService = {
   },
 
   async updateOrder(id, data) {
-    return await prisma.order.update({
-      where: { id },
-      data: {
-        actualReceivedAmount:
-          data.actualReceivedAmount !== undefined &&
-          data.actualReceivedAmount !== ""
-            ? Number(data.actualReceivedAmount)
-            : null,
-      },
-      include: { items: true },
+    const {
+      customerName,
+      customerPhone,
+      shippingAddress,
+      deliveryFee = 120,
+      discountAmount = 0,
+      notes,
+      items = [],
+    } = data;
+
+    return await prisma.$transaction(async (tx) => {
+      // 1. Fetch existing order to revert previous stock deductions
+      const existingOrder = await tx.order.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+
+      if (!existingOrder) {
+        throw new Error("Order not found");
+      }
+
+      // Revert previous inventory stock levels
+      for (const oldItem of existingOrder.items) {
+        await tx.product.update({
+          where: { id: oldItem.productId },
+          data: { stockQuantity: { increment: oldItem.quantity } },
+        });
+      }
+
+      // 2. Clear previous order items
+      await tx.orderItem.deleteMany({
+        where: { orderId: id },
+      });
+
+      // 3. Process new items and deduct updated stock
+      let itemsSubtotal = 0;
+      const newItemsData = [];
+
+      for (const item of items) {
+        const product = await tx.product.findUnique({
+          where: { id: item.productId },
+        });
+
+        if (!product) {
+          throw new Error(`Product with ID ${item.productId} not found`);
+        }
+
+        const effectiveUnitPrice =
+          item.unitPrice !== undefined && item.unitPrice !== ""
+            ? Number(item.unitPrice)
+            : product.actualSellingPrice || product.sellingPrice;
+
+        const lineTotal = effectiveUnitPrice * Number(item.quantity);
+        itemsSubtotal += lineTotal;
+
+        newItemsData.push({
+          productId: product.id,
+          title: product.title,
+          quantity: Number(item.quantity),
+          unitPrice: effectiveUnitPrice,
+          total: lineTotal,
+        });
+
+        // Deduct updated stock quantity
+        await tx.product.update({
+          where: { id: product.id },
+          data: { stockQuantity: { decrement: Number(item.quantity) } },
+        });
+      }
+
+      const newGrandTotal = Math.max(
+        0,
+        itemsSubtotal + Number(deliveryFee) - Number(discountAmount),
+      );
+
+      // 4. Update Order details
+      const updatedOrder = await tx.order.update({
+        where: { id },
+        data: {
+          customerName,
+          customerPhone,
+          shippingAddress,
+          deliveryFee: Number(deliveryFee),
+          discountAmount: Number(discountAmount),
+          totalAmount: newGrandTotal,
+          notes: notes || null,
+          items: {
+            create: newItemsData,
+          },
+        },
+        include: { items: true },
+      });
+
+      // 5. Re-sync auto-credit in Bank Ledger if delivered
+      if (updatedOrder.status === "DELIVERED") {
+        const creditAmount =
+          updatedOrder.actualReceivedAmount !== null &&
+          updatedOrder.actualReceivedAmount !== undefined
+            ? updatedOrder.actualReceivedAmount
+            : updatedOrder.totalAmount;
+
+        await tx.bankTransaction.upsert({
+          where: {
+            id:
+              (await tx.bankTransaction.findFirst({ where: { orderId: id } }))
+                ?.id || "",
+          },
+          update: {
+            amount: creditAmount,
+            description: `Auto-Credit: Order #${updatedOrder.orderNumber} Delivered`,
+          },
+          create: {
+            orderId: updatedOrder.id,
+            description: `Auto-Credit: Order #${updatedOrder.orderNumber} Delivered`,
+            type: "INFLOW",
+            amount: creditAmount,
+            referenceNo: updatedOrder.orderNumber,
+            notes: `Auto-generated credit upon delivery for customer ${updatedOrder.customerName}`,
+          },
+        });
+      }
+
+      return updatedOrder;
     });
   },
 
