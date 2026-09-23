@@ -95,3 +95,27 @@ export const deleteOrder = async (req, res, next) => {
     next(err);
   }
 };
+
+export const sendToSteadfast = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const updatedOrder = await orderService.sendToSteadfast(id);
+    res.json({
+      success: true,
+      data: updatedOrder,
+      message: "Order sent to Steadfast successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const syncSteadfast = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const updatedOrder = await orderService.syncSteadfastStatus(id);
+    res.json({ success: true, data: updatedOrder });
+  } catch (err) {
+    next(err);
+  }
+};

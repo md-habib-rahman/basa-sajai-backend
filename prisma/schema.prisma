@@ -168,16 +168,40 @@ model Order {
     totalAmount          Float       @default(0)
     deliveryFee          Float       @default(0)
     discountAmount       Float       @default(0)
-    actualReceivedAmount Float? // <--- ADD THIS FIELD (Amount received after courier deductions)
+    actualReceivedAmount Float?
     status               OrderStatus @default(PENDING)
     notes                String?
     createdAt            DateTime    @default(now())
     updatedAt            DateTime    @updatedAt
 
+    // Steadfast Integration Fields
+    consignmentId   Int?      @unique
+    trackingCode    String?
+    courierStatus   String?
+    sentToCourierAt DateTime?
+
     items            OrderItem[]
     bankTransactions BankTransaction[]
+    webhookLogs      CourierWebhookLog[]
 
     @@map("order")
+}
+
+model CourierWebhookLog {
+    id             String   @id @default(cuid())
+    orderId        String?
+    consignmentId  Int?
+    invoice        String?
+    status         String
+    codAmount      Float?
+    deliveryCharge Float?
+    netPayout      Float?
+    rawPayload     Json
+    createdAt      DateTime @default(now())
+
+    order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+    @@map("courier_webhook_log")
 }
 
 model OrderItem {

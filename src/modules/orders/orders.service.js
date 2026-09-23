@@ -1,6 +1,7 @@
 import { prisma } from "../../config/db.js";
 import { paginate } from "../../common/utils/paginate.js";
 import { generateOrderNumber } from "./generateOrderNumber.js";
+import { steadfastService } from "../steadfast/steadfast.service.js";
 
 export const orderService = {
   async getAllOrders({ page = 1, limit = 10, search = "", status = "" }) {
@@ -304,5 +305,74 @@ export const orderService = {
   },
   async deleteOrder(id) {
     return await prisma.order.delete({ where: { id } });
+  },
+
+  async sendToSteadfast(orderId) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    if (order.consignmentId) {
+      throw new Error(
+        `Order #${order.orderNumber} is already sent to Steadfast (Consignment ID: ${order.consignmentId})`,
+      );
+    }
+
+    // Call Steadfast API
+    const response = await steadfastService.createConsignment({
+      invoice: order.orderNumber,
+      recipient_name: order.customerName,
+      recipient_phone: order.customerPhone,
+      recipient_address: order.shippingAddress,
+      cod_amount: order.totalAmount,
+      note: order.notes || "",
+    });
+
+    if (response.status !== 200 || !response.consignment) {
+      throw new Error(
+        response.message || "Failed to create consignment with Steadfast",
+      );
+    }
+
+    const consignment = response.consignment;
+
+    // Save tracking details & advance status to SHIPPED
+    return await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        consignmentId: consignment.consignment_id,
+        trackingCode: consignment.tracking_code,
+        courierStatus: consignment.status || "in_review",
+        sentToCourierAt: new Date(),
+        status: "SHIPPED",
+      },
+    });
+  },
+
+  async syncSteadfastStatus(orderId) {
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || !order.consignmentId) {
+      throw new Error("Order has no consignment ID to track");
+    }
+
+    const response = await steadfastService.getStatusByCid(order.consignmentId);
+    const courierStatus = response.delivery_status || response.status;
+
+    let mappedStatus = order.status;
+    const lower = (courierStatus || "").toLowerCase();
+    if (lower === "delivered") mappedStatus = "DELIVERED";
+    if (lower === "cancelled") mappedStatus = "CANCELLED";
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { courierStatus },
+    });
+
+    return await this.updateOrderStatus(orderId, { status: mappedStatus });
   },
 };

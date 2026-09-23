@@ -1,3 +1,5 @@
 node_modules/
 .env
 src/generated/prisma/
+src/seed-admin.js
+src/seed-investments.js

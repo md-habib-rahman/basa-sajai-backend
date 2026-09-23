@@ -8,12 +8,14 @@ import investmentRoutes from "./modules/investments/investments.routes.js";
 import orderRoutes from "./modules/orders/orders.routes.js";
 import userRoutes from "./modules/users/users.routes.js";
 import roiRoutes from "./modules/roi/roi.routes.js";
-import bankRoutes from './modules/bank/bank.routes.js';
+import bankRoutes from "./modules/bank/bank.routes.js";
+import steadfastRoutes from "./modules/steadfast/steadfast.routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.route.js";
 
 // Express Module Registration
 
 const app = express();
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 // 1. CORS Configuration (Allows cookies/headers from Vite frontend)
 app.use(
   cors({
@@ -21,8 +23,6 @@ app.use(
     credentials: true,
   }),
 );
-
-
 
 // 2. Better Auth Catch-All Handler
 app.all("/api/auth/{*any}", toNodeHandler(auth));
@@ -37,7 +37,10 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/investments", investmentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/roi", roiRoutes);
-app.use('/api/bank', bankRoutes);
+app.use("/api/bank", bankRoutes);
+app.use("/api/steadfast", steadfastRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+
 // 5. Health Check Route
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date() });
