@@ -480,4 +480,41 @@ export const orderService = {
 
     return await this.updateOrderStatus(orderId, { status: mappedStatus });
   },
+
+  async searchCustomerSuggestions(query = "") {
+    if (!query || query.trim().length < 2) return [];
+
+    // Find distinct customer details from previous orders matching name or phone
+    const orders = await prisma.order.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { customerName: { contains: query, mode: "insensitive" } },
+          { customerPhone: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        customerName: true,
+        customerPhone: true,
+        shippingAddress: true,
+      },
+      take: 20,
+      orderBy: { createdAt: "desc" },
+    });
+
+    // Deduplicate results by phone number (or name)
+    const uniqueMap = new Map();
+    orders.forEach((o) => {
+      const key = o.customerPhone || o.customerName;
+      if (key && !uniqueMap.has(key)) {
+        uniqueMap.set(key, {
+          customerName: o.customerName,
+          customerPhone: o.customerPhone,
+          shippingAddress: o.shippingAddress || "",
+        });
+      }
+    });
+
+    return Array.from(uniqueMap.values()).slice(0, 5); // Return top 5 suggestions
+  },
 };

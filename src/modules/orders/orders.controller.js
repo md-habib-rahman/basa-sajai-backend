@@ -126,3 +126,13 @@ export const syncSteadfast = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getCustomerSuggestions = async (req, res, next) => {
+  try {
+    const { q } = req.query;
+    const suggestions = await orderService.searchCustomerSuggestions(q);
+    res.json({ success: true, data: suggestions });
+  } catch (err) {
+    next(err);
+  }
+};

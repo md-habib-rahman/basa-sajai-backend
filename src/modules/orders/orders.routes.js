@@ -7,6 +7,7 @@ import {
   deleteOrder,
   sendToSteadfast,
   syncSteadfast,
+  getCustomerSuggestions,
 } from "./orders.controller.js";
 
 import { requireAuth, requireRoles } from "../../middlewares/auth.js";
@@ -22,5 +23,6 @@ router.patch("/:id/status", updateOrderStatus);
 router.delete("/:id", deleteOrder);
 router.post("/:id/send-to-steadfast", sendToSteadfast);
 router.post("/:id/sync-steadfast", syncSteadfast);
+router.get("/customers/suggest", getCustomerSuggestions);
 
 export default router;
