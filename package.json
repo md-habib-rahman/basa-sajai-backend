@@ -6,7 +6,8 @@
   "scripts": {
     "build": "prisma generate",
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+	"scripts:reconcile":"node src/scripts/reconcile-stock.js"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.6.29",

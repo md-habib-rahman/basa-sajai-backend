@@ -88,10 +88,12 @@ model Product {
     totalLandedCost    Float           @default(0)
     sellingPrice       Float           @default(0) // Calculated (+40% revenue)
     actualSellingPrice Int             @default(0)
+    deletedAt          DateTime?
     createdAt          DateTime        @default(now())
     updatedAt          DateTime        @updatedAt
     productCosting     ProductCosting?
     orderItems         OrderItem[]
+    inventoryLogs      InventoryLog[]
 }
 
 model ProductCosting {
@@ -173,16 +175,17 @@ model Order {
     notes                String?
     createdAt            DateTime    @default(now())
     updatedAt            DateTime    @updatedAt
-
+    deletedAt            DateTime?
     // Steadfast Integration Fields
-    consignmentId   Int?      @unique
-    trackingCode    String?
-    courierStatus   String?
-    sentToCourierAt DateTime?
+    consignmentId        Int?        @unique
+    trackingCode         String?
+    courierStatus        String?
+    sentToCourierAt      DateTime?
 
     items            OrderItem[]
     bankTransactions BankTransaction[]
     webhookLogs      CourierWebhookLog[]
+    inventoryLogs    InventoryLog[]
 
     @@map("order")
 }
@@ -217,4 +220,43 @@ model OrderItem {
     product Product @relation(fields: [productId], references: [id])
 
     @@map("order_item")
+}
+
+enum InventoryChangeType {
+    ORDER_CREATED
+    ORDER_CANCELLED
+    ORDER_EDIT
+    MANUAL_ADJUSTMENT
+    RESTOCK
+    RETURNED
+}
+
+model InventoryLog {
+    id             String              @id @default(cuid())
+    productId      String
+    orderId        String?
+    userId         String?
+    changeType     InventoryChangeType
+    quantityChange Int // e.g., +5 (restock) or -2 (deduction)
+    note           String?
+    createdAt      DateTime            @default(now())
+
+    // Relations
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+    order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+    @@map("inventory_log")
+}
+
+model SystemAuditLog {
+    id        String   @id @default(cuid())
+    userId    String?
+    action    String // e.g., "ORDER_CANCELLED", "STOCK_ADJUSTED"
+    entity    String // e.g., "Order", "Product"
+    entityId  String?
+    details   Json? // Stores before/after snapshot
+    ipAddress String?
+    createdAt DateTime @default(now())
+
+    @@map("system_audit_log")
 }

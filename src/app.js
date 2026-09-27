@@ -11,6 +11,7 @@ import roiRoutes from "./modules/roi/roi.routes.js";
 import bankRoutes from "./modules/bank/bank.routes.js";
 import steadfastRoutes from "./modules/steadfast/steadfast.routes.js";
 import dashboardRoutes from "./modules/dashboard/dashboard.route.js";
+import reportsRoutes from "./modules/reports/reports.routes.js";
 
 // Express Module Registration
 
@@ -26,7 +27,7 @@ app.use(
 
 // 2. Better Auth Catch-All Handler
 app.all("/api/auth/{*any}", toNodeHandler(auth));
-
+app.use("/api/steadfast/webhook", steadfastRoutes);
 // 3. Body Parsers (For standard API routes)
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -40,6 +41,7 @@ app.use("/api/roi", roiRoutes);
 app.use("/api/bank", bankRoutes);
 app.use("/api/steadfast", steadfastRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/reports", reportsRoutes);
 
 // 5. Health Check Route
 app.get("/health", (req, res) => {

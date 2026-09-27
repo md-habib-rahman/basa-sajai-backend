@@ -5,16 +5,29 @@ export const bankController = {
     try {
       const { page, limit, search, type } = req.query;
       const result = await bankService.getAllTransactions({
-        page,
-        limit,
+        page: page ? parseInt(page) : 1,
+        limit: limit ? parseInt(limit) : 10,
         search,
         type,
       });
+
       res.json({
         success: true,
         data: result.items,
         meta: result.meta,
         summary: result.summary,
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async getSummary(req, res, next) {
+    try {
+      const summary = await bankService.getSummary();
+      res.json({
+        success: true,
+        data: summary,
       });
     } catch (err) {
       next(err);

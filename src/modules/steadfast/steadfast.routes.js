@@ -1,11 +1,17 @@
-import express from "express";
+import { Router, raw } from "express";
 import { steadfastController } from "./steadfast.controller.js";
 import { requireAuth } from "../../middlewares/auth.js";
+import { verifySteadfastWebhook } from "../../middlewares/verifySteadfastWebhook.js";
 
-const router = express.Router();
+const router = Router();
 
 // Webhook endpoint (Publicly reachable for Steadfast server)
-router.post("/webhook", steadfastController.handleWebhook);
+router.post(
+  "/",
+  raw({ type: "application/json" }),
+  verifySteadfastWebhook,
+  steadfastController.handleWebhook,
+);
 
 // Protected endpoints for dashboard
 router.get("/balance", steadfastController.getMerchantBalance);

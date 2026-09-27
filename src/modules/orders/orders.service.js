@@ -5,7 +5,9 @@ import { steadfastService } from "../steadfast/steadfast.service.js";
 
 export const orderService = {
   async getAllOrders({ page = 1, limit = 10, search = "", status = "" }) {
-    const where = {};
+    const where = {
+      deletedAt: null, // Exclude soft-deleted orders
+    };
 
     if (search) {
       where.OR = [
@@ -24,38 +26,55 @@ export const orderService = {
       limit,
       where,
       orderBy: { createdAt: "desc" },
-      include: { items: true },
+      include: { items: { include: { product: true } } },
     });
   },
 
-  async createOrder(data) {
+  async getOrderById(id) {
+    const order = await prisma.order.findFirst({
+      where: { id, deletedAt: null },
+      include: { items: { include: { product: true } } },
+    });
+
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    return order;
+  },
+
+  async createOrder(data, userId = null) {
     const {
       customerName,
       customerPhone,
       shippingAddress,
       deliveryFee = 0,
       discountAmount = 0,
-      items,
+      items = [],
       notes,
     } = data;
 
-    // const randomHex = Math.random().toString(36).substring(2, 6).toUpperCase();
     const orderNumber = await generateOrderNumber();
-    // console.log(orderNumber)
 
     let itemsTotal = 0;
     const preparedItems = [];
 
+    // Pre-validate stock availability for all products before transaction
     for (const item of items) {
-      const product = await prisma.product.findUnique({
-        where: { id: item.productId },
+      const product = await prisma.product.findFirst({
+        where: { id: item.productId, deletedAt: null },
       });
-      if (!product) throw new Error(`Product not found: ${item.productId}`);
-      if (product.stockQuantity < item.quantity) {
-        throw new Error(`Insufficient stock for product: ${product.title}`);
+
+      if (!product) {
+        throw new Error(`Product not found or inactive: ${item.productId}`);
       }
 
-      // Use manually specified price OR fallback to actual/calculated selling price
+      if (product.stockQuantity < Number(item.quantity)) {
+        throw new Error(
+          `Insufficient stock for "${product.title}". Requested: ${item.quantity}, Available: ${product.stockQuantity}`,
+        );
+      }
+
       const effectiveUnitPrice =
         item.unitPrice !== undefined &&
         item.unitPrice !== null &&
@@ -63,15 +82,14 @@ export const orderService = {
           ? Number(item.unitPrice)
           : product.actualSellingPrice || product.sellingPrice;
 
-      const itemTotal = effectiveUnitPrice * Number(item.quantity);
-      itemsTotal += itemTotal;
+      const lineTotal = effectiveUnitPrice * Number(item.quantity);
+      itemsTotal += lineTotal;
 
       preparedItems.push({
         productId: product.id,
         title: product.title,
         quantity: Number(item.quantity),
         unitPrice: effectiveUnitPrice,
-        total: itemTotal,
       });
     }
 
@@ -81,6 +99,7 @@ export const orderService = {
     );
 
     return await prisma.$transaction(async (tx) => {
+      // 1. Create Order
       const newOrder = await tx.order.create({
         data: {
           orderNumber,
@@ -95,9 +114,10 @@ export const orderService = {
             create: preparedItems,
           },
         },
-        include: { items: true },
+        include: { items: { include: { product: true } } },
       });
 
+      // 2. Decrement Product Stock & Create Inventory Logs
       for (const item of preparedItems) {
         await tx.product.update({
           where: { id: item.productId },
@@ -107,134 +127,169 @@ export const orderService = {
             },
           },
         });
+
+        await tx.inventoryLog.create({
+          data: {
+            productId: item.productId,
+            orderId: newOrder.id,
+            userId,
+            changeType: "ORDER_CREATED",
+            quantityChange: -item.quantity,
+            note: `Deducted ${item.quantity} units for Order #${newOrder.orderNumber}`,
+          },
+        });
       }
 
       return newOrder;
     });
   },
 
-  async updateOrder(id, data) {
+  async updateOrder(id, data, userId = null) {
     const {
       customerName,
       customerPhone,
       shippingAddress,
-      deliveryFee = 120,
+      deliveryFee = 0,
       discountAmount = 0,
+      status,
       notes,
       items = [],
     } = data;
 
-    return await prisma.$transaction(async (tx) => {
-      // 1. Fetch existing order to revert previous stock deductions
-      const existingOrder = await tx.order.findUnique({
-        where: { id },
-        include: { items: true },
+    // Fetch existing order with current items
+    const existingOrder = await prisma.order.findFirst({
+      where: { id, deletedAt: null },
+      include: { items: true },
+    });
+
+    if (!existingOrder) {
+      throw new Error("Order not found");
+    }
+
+    // 1. Pre-validate stock availability for the NEW items
+    // Account for stock that will be returned from existing items if they overlap
+    let itemsTotal = 0;
+    const preparedItems = [];
+
+    for (const item of items) {
+      const product = await prisma.product.findFirst({
+        where: { id: item.productId, deletedAt: null },
       });
 
-      if (!existingOrder) {
-        throw new Error("Order not found");
+      if (!product) {
+        throw new Error(`Product not found or inactive: ${item.productId}`);
       }
 
-      // Revert previous inventory stock levels
+      // Calculate how many items of this product were previously reserved in this order
+      const existingLineItem = existingOrder.items.find(
+        (i) => i.productId === item.productId,
+      );
+      const previouslyReserved = existingLineItem
+        ? existingLineItem.quantity
+        : 0;
+      const effectiveAvailableStock =
+        product.stockQuantity + previouslyReserved;
+
+      if (effectiveAvailableStock < Number(item.quantity)) {
+        throw new Error(
+          `Insufficient stock for "${product.title}". Requested: ${item.quantity}, Available: ${effectiveAvailableStock}`,
+        );
+      }
+
+      const effectiveUnitPrice =
+        item.unitPrice !== undefined &&
+        item.unitPrice !== null &&
+        item.unitPrice !== ""
+          ? Number(item.unitPrice)
+          : product.actualSellingPrice || product.sellingPrice;
+
+      const lineTotal = effectiveUnitPrice * Number(item.quantity);
+      itemsTotal += lineTotal;
+
+      preparedItems.push({
+        productId: product.id,
+        title: product.title,
+        quantity: Number(item.quantity),
+        unitPrice: effectiveUnitPrice,
+      });
+    }
+
+    const grandTotal = Math.max(
+      0,
+      itemsTotal + Number(deliveryFee || 0) - Number(discountAmount || 0),
+    );
+
+    // Execute atomic update transaction
+    return await prisma.$transaction(async (tx) => {
+      // Step A: Revert old product stock reserves
       for (const oldItem of existingOrder.items) {
         await tx.product.update({
           where: { id: oldItem.productId },
-          data: { stockQuantity: { increment: oldItem.quantity } },
+          data: {
+            stockQuantity: {
+              increment: oldItem.quantity,
+            },
+          },
+        });
+
+        await tx.inventoryLog.create({
+          data: {
+            productId: oldItem.productId,
+            orderId: existingOrder.id,
+            userId,
+            changeType: "ORDER_EDIT",
+            quantityChange: oldItem.quantity,
+            note: `Returned ${oldItem.quantity} units for edit on Order #${existingOrder.orderNumber}`,
+          },
         });
       }
 
-      // 2. Clear previous order items
+      // Step B: Clear old order line items
       await tx.orderItem.deleteMany({
         where: { orderId: id },
       });
 
-      // 3. Process new items and deduct updated stock
-      let itemsSubtotal = 0;
-      const newItemsData = [];
-
-      for (const item of items) {
-        const product = await tx.product.findUnique({
-          where: { id: item.productId },
-        });
-
-        if (!product) {
-          throw new Error(`Product with ID ${item.productId} not found`);
-        }
-
-        const effectiveUnitPrice =
-          item.unitPrice !== undefined && item.unitPrice !== ""
-            ? Number(item.unitPrice)
-            : product.actualSellingPrice || product.sellingPrice;
-
-        const lineTotal = effectiveUnitPrice * Number(item.quantity);
-        itemsSubtotal += lineTotal;
-
-        newItemsData.push({
-          productId: product.id,
-          title: product.title,
-          quantity: Number(item.quantity),
-          unitPrice: effectiveUnitPrice,
-          total: lineTotal,
-        });
-
-        // Deduct updated stock quantity
+      // Step C: Deduct stock for new order line items & log
+      for (const newItem of preparedItems) {
         await tx.product.update({
-          where: { id: product.id },
-          data: { stockQuantity: { decrement: Number(item.quantity) } },
+          where: { id: newItem.productId },
+          data: {
+            stockQuantity: {
+              decrement: newItem.quantity,
+            },
+          },
+        });
+
+        await tx.inventoryLog.create({
+          data: {
+            productId: newItem.productId,
+            orderId: existingOrder.id,
+            userId,
+            changeType: "ORDER_EDIT",
+            quantityChange: -newItem.quantity,
+            note: `Re-allocated ${newItem.quantity} units for Order #${existingOrder.orderNumber}`,
+          },
         });
       }
 
-      const newGrandTotal = Math.max(
-        0,
-        itemsSubtotal + Number(deliveryFee) - Number(discountAmount),
-      );
-
-      // 4. Update Order details
+      // Step D: Update Order record
       const updatedOrder = await tx.order.update({
         where: { id },
         data: {
-          customerName,
-          customerPhone,
-          shippingAddress,
+          customerName: customerName ?? existingOrder.customerName,
+          customerPhone: customerPhone ?? existingOrder.customerPhone,
+          shippingAddress: shippingAddress ?? existingOrder.shippingAddress,
           deliveryFee: Number(deliveryFee),
           discountAmount: Number(discountAmount),
-          totalAmount: newGrandTotal,
-          notes: notes || null,
+          totalAmount: grandTotal,
+          status: status || existingOrder.status,
+          notes: notes !== undefined ? notes : existingOrder.notes,
           items: {
-            create: newItemsData,
+            create: preparedItems,
           },
         },
-        include: { items: true },
+        include: { items: { include: { product: true } } },
       });
-
-      // 5. Re-sync auto-credit in Bank Ledger if delivered
-      if (updatedOrder.status === "DELIVERED") {
-        const creditAmount =
-          updatedOrder.actualReceivedAmount !== null &&
-          updatedOrder.actualReceivedAmount !== undefined
-            ? updatedOrder.actualReceivedAmount
-            : updatedOrder.totalAmount;
-
-        await tx.bankTransaction.upsert({
-          where: {
-            id:
-              (await tx.bankTransaction.findFirst({ where: { orderId: id } }))
-                ?.id || "",
-          },
-          update: {
-            amount: creditAmount,
-            description: `Auto-Credit: Order #${updatedOrder.orderNumber} Delivered`,
-          },
-          create: {
-            orderId: updatedOrder.id,
-            description: `Auto-Credit: Order #${updatedOrder.orderNumber} Delivered`,
-            type: "INFLOW",
-            amount: creditAmount,
-            referenceNo: updatedOrder.orderNumber,
-            notes: `Auto-generated credit upon delivery for customer ${updatedOrder.customerName}`,
-          },
-        });
-      }
 
       return updatedOrder;
     });
@@ -260,7 +315,6 @@ export const orderService = {
       include: { items: true },
     });
 
-    // AUTO-CREDIT / DE-CREDIT LOGIC FOR BANK PAGE
     const creditAmount =
       updatedOrder.actualReceivedAmount !== null &&
       updatedOrder.actualReceivedAmount !== undefined
@@ -268,7 +322,6 @@ export const orderService = {
         : updatedOrder.totalAmount;
 
     if (updatedOrder.status === "DELIVERED") {
-      // Upsert Auto-Credit Bank Transaction
       const existingTx = await prisma.bankTransaction.findFirst({
         where: { orderId: updatedOrder.id },
       });
@@ -295,7 +348,7 @@ export const orderService = {
         });
       }
     } else {
-      // If status changed away from DELIVERED, remove auto-credit
+      // If status changed away from DELIVERED, remove auto-credit entry
       await prisma.bankTransaction.deleteMany({
         where: { orderId: updatedOrder.id },
       });
@@ -303,18 +356,69 @@ export const orderService = {
 
     return updatedOrder;
   },
-  async deleteOrder(id) {
-    return await prisma.order.delete({ where: { id } });
+
+  async softDeleteOrder(orderId, userId = null) {
+    return await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true },
+      });
+
+      if (!order) {
+        throw new Error("Order not found or already deleted");
+      }
+
+      // Revert stock and write inventory log if order was not already cancelled
+      if (order.status !== "CANCELLED") {
+        for (const item of order.items) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stockQuantity: { increment: item.quantity } },
+          });
+
+          await tx.inventoryLog.create({
+            data: {
+              productId: item.productId,
+              orderId: order.id,
+              userId,
+              changeType: "ORDER_CANCELLED",
+              quantityChange: item.quantity,
+              note: `Stock restored from soft-deleted Order #${order.orderNumber}`,
+            },
+          });
+        }
+      }
+
+      // Remove bank transaction auto-credits if any
+      await tx.bankTransaction.deleteMany({
+        where: { orderId: order.id },
+      });
+
+      // Soft delete order
+      const updatedOrder = await tx.order.update({
+        where: { id: orderId },
+        data: {
+          deletedAt: new Date(),
+          status: "CANCELLED",
+        },
+      });
+
+      return updatedOrder;
+    });
+  },
+
+  async deleteOrder(id, userId = null) {
+    return await this.softDeleteOrder(id, userId);
   },
 
   async sendToSteadfast(orderId) {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, deletedAt: null },
       include: { items: true },
     });
 
     if (!order) {
-      throw new Error("Order not found");
+      throw new Error("Order not found or deleted");
     }
 
     if (order.consignmentId) {
@@ -323,7 +427,6 @@ export const orderService = {
       );
     }
 
-    // Call Steadfast API
     const response = await steadfastService.createConsignment({
       invoice: order.orderNumber,
       recipient_name: order.customerName,
@@ -341,7 +444,6 @@ export const orderService = {
 
     const consignment = response.consignment;
 
-    // Save tracking details & advance status to SHIPPED
     return await prisma.order.update({
       where: { id: orderId },
       data: {
@@ -355,7 +457,10 @@ export const orderService = {
   },
 
   async syncSteadfastStatus(orderId) {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, deletedAt: null },
+    });
+
     if (!order || !order.consignmentId) {
       throw new Error("Order has no consignment ID to track");
     }
