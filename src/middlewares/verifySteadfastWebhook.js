@@ -1,72 +1,107 @@
-import crypto from "crypto";
-
-const processedIdempotencyKeys = new Set();
+import crypto from "node:crypto";
 
 export const verifySteadfastWebhook = (req, res, next) => {
   try {
-    const token = process.env.STEADFAST_WEBHOOK_SECRET;
+    // ---------------------------------------------------------
+    // 1. Get webhook secret
+    // ---------------------------------------------------------
 
-    if (!token) {
-      console.error("STEADFAST_WEBHOOK_SECRET is missing in environment variables.");
-      return res.status(500).json({ success: false, message: "Webhook secret missing" });
-    }
+    const secret = process.env.STEADFAST_WEBHOOK_SECRET;
 
-    // 1. Authorization Header Check
-    const authHeader = req.get("Authorization") || "";
-    const [type, value] = authHeader.split(" ");
-    if (type !== "Bearer" || value !== token) {
-      return res.status(401).json({ success: false, message: "Invalid Bearer token" });
-    }
+    if (!secret) {
+      console.error(
+        "STEADFAST_WEBHOOK_SECRET is missing in environment variables.",
+      );
 
-    // 2. Idempotency Key Check
-    const idempotencyKey = req.get("Idempotency-Key");
-    if (idempotencyKey && processedIdempotencyKeys.has(idempotencyKey)) {
-      return res.status(200).json({
-        success: true,
-        message: "Event already processed (Idempotent request)",
+      return res.status(500).json({
+        success: false,
+        message: "Webhook secret missing",
       });
     }
 
-    // 3. Signature Check (using Buffer directly)
-    const rawBodyBuffer = req.body;
-    if (!rawBodyBuffer || !Buffer.isBuffer(rawBodyBuffer)) {
-      return res.status(400).json({ success: false, message: "Missing body buffer" });
-    }
+    // ---------------------------------------------------------
+    // 2. Make sure express.raw() was used
+    // ---------------------------------------------------------
 
-    const expected = crypto
-      .createHmac("sha256", token)
-      .update(rawBodyBuffer)
-      .digest("hex");
+    const rawBody = req.body;
 
-    const given = req.get("X-Signature") || "";
+    if (!Buffer.isBuffer(rawBody)) {
+      console.error(
+        "Steadfast webhook body is not a Buffer. " +
+          "Make sure express.raw({ type: 'application/json' }) " +
+          "is used before this middleware.",
+      );
 
-    if (
-      given.length !== expected.length ||
-      !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))
-    ) {
-      return res.status(401).json({ success: false, message: "Invalid signature" });
-    }
-
-    // 4. Safe JSON Parsing (Prevents app crash on invalid JSON)
-    try {
-      req.parsedBody = JSON.parse(rawBodyBuffer.toString("utf8"));
-    } catch (parseErr) {
-      console.error("Webhook Body JSON Parse Error:", parseErr.message);
       return res.status(400).json({
         success: false,
-        message: "Invalid JSON format in raw body",
+        message: "Invalid webhook body",
       });
     }
 
-    // Mark idempotency key as processed
-    if (idempotencyKey) {
-      processedIdempotencyKeys.add(idempotencyKey);
-      setTimeout(() => processedIdempotencyKeys.delete(idempotencyKey), 86400000);
+    // ---------------------------------------------------------
+    // 3. Verify HMAC SHA-256 signature
+    // ---------------------------------------------------------
+
+    const expectedSignature = crypto
+      .createHmac("sha256", secret)
+      .update(rawBody)
+      .digest("hex");
+
+    const receivedSignature = req.get("X-Signature") || "";
+
+    const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+    const receivedBuffer = Buffer.from(receivedSignature, "utf8");
+
+    // timingSafeEqual() requires equal-length buffers
+    if (
+      receivedBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
+    ) {
+      console.warn("Invalid Steadfast webhook signature");
+
+      return res.status(401).json({
+        success: false,
+        message: "Invalid signature",
+      });
     }
 
+    // ---------------------------------------------------------
+    // 4. Parse JSON AFTER signature verification
+    // ---------------------------------------------------------
+
+    let parsedBody;
+
+    try {
+      parsedBody = JSON.parse(rawBody.toString("utf8"));
+    } catch (error) {
+      console.error("Steadfast webhook JSON parse error:", error.message);
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid JSON format",
+      });
+    }
+
+    // ---------------------------------------------------------
+    // 5. Make parsed payload available to controller
+    // ---------------------------------------------------------
+
+    req.parsedBody = parsedBody;
+
+    // Keep raw body available if you need it later
+    req.rawBody = rawBody;
+
+    // ---------------------------------------------------------
+    // 6. Continue to controller
+    // ---------------------------------------------------------
+
     next();
-  } catch (err) {
-    console.error("Webhook Verification Error:", err);
-    return res.status(400).json({ success: false, message: "Webhook verification failed" });
+  } catch (error) {
+    console.error("Steadfast webhook verification error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Webhook verification failed",
+    });
   }
 };

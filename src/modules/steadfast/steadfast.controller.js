@@ -1,22 +1,35 @@
 import { steadfastService } from "./steadfast.service.js";
 import { prisma } from "../../config/db.js";
 import { orderService } from "../orders/orders.service.js";
+import crypto from "node:crypto";
 
 export const steadfastController = {
   /**
    * Webhook endpoint called by Steadfast on status changes
    */
-async handleWebhook(req, res, next) {
+
+  async handleWebhook(req, res, next) {
     try {
-      // Body parsed safely by verifySteadfastWebhook middleware
+      // Payload has already been:
+      // 1. Received as raw Buffer
+      // 2. HMAC verified
+      // 3. JSON parsed
+      // by verifySteadfastWebhook middleware
+
       const payload = req.parsedBody || {};
+
       const {
         consignment_id,
         invoice,
         cod_amount,
         delivery_charge = 0,
         status,
+        notification_type,
       } = payload;
+
+      // ---------------------------------------------------------
+      // 1. Validate webhook payload
+      // ---------------------------------------------------------
 
       if (!consignment_id && !invoice) {
         return res.status(400).json({
@@ -25,36 +38,68 @@ async handleWebhook(req, res, next) {
         });
       }
 
-      // 1. Calculate Net Payout
+      // ---------------------------------------------------------
+      // 2. Calculate Net Payout
+      // ---------------------------------------------------------
+
       const rawCod = Number(cod_amount || 0);
       const rawDeliveryCharge = Number(delivery_charge || 0);
+
       const baseAfterDelivery = Math.max(0, rawCod - rawDeliveryCharge);
+
       const codFee = Math.round(baseAfterDelivery * 0.01);
+
       const calculatedNetPayout = Math.max(0, baseAfterDelivery - codFee);
 
-      // 2. Find Order
+      // ---------------------------------------------------------
+      // 3. Find Order
+      // ---------------------------------------------------------
+
       const order = await prisma.order.findFirst({
         where: {
           OR: [
-            { consignmentId: consignment_id ? Number(consignment_id) : undefined },
-            { orderNumber: invoice },
-          ],
+            consignment_id
+              ? {
+                  consignmentId: Number(consignment_id),
+                }
+              : undefined,
+
+            invoice
+              ? {
+                  orderNumber: invoice,
+                }
+              : undefined,
+          ].filter(Boolean),
         },
       });
 
-      // 3. Log Raw Callback
+      // ---------------------------------------------------------
+      // 4. Log Webhook
+      // ---------------------------------------------------------
+
       await prisma.courierWebhookLog.create({
         data: {
           orderId: order?.id || null,
+
           consignmentId: consignment_id ? Number(consignment_id) : null,
+
           invoice: invoice || null,
+
           status: status || "unknown",
+
           codAmount: rawCod,
+
           deliveryCharge: rawDeliveryCharge,
+
           netPayout: calculatedNetPayout,
+
           rawPayload: payload,
         },
       });
+
+      // ---------------------------------------------------------
+      // 5. Order not found
+      // ---------------------------------------------------------
 
       if (!order) {
         return res.status(404).json({
@@ -63,8 +108,12 @@ async handleWebhook(req, res, next) {
         });
       }
 
-      // 4. Status mapping logic
+      // ---------------------------------------------------------
+      // 6. Map Steadfast status → Application status
+      // ---------------------------------------------------------
+
       let mappedStatus = order.status;
+
       const lowerStatus = (status || "").toLowerCase();
 
       if (lowerStatus === "delivered") {
@@ -85,29 +134,57 @@ async handleWebhook(req, res, next) {
         mappedStatus = "SHIPPED";
       }
 
-      // 5. Update Order
+      // ---------------------------------------------------------
+      // 7. Update Courier Information
+      // ---------------------------------------------------------
+
       await prisma.order.update({
-        where: { id: order.id },
+        where: {
+          id: order.id,
+        },
+
         data: {
           courierStatus: status,
+
           actualReceivedAmount:
-            lowerStatus === "delivered" ? calculatedNetPayout : order.actualReceivedAmount,
+            lowerStatus === "delivered"
+              ? calculatedNetPayout
+              : order.actualReceivedAmount,
         },
       });
 
-      // 6. Sync Order Status & Bank Auto-Credit
+      // ---------------------------------------------------------
+      // 8. Sync Application Order Status
+      // ---------------------------------------------------------
+
       await orderService.updateOrderStatus(order.id, {
         status: mappedStatus,
-        actualReceivedAmount: lowerStatus === "delivered" ? calculatedNetPayout : undefined,
+
+        actualReceivedAmount:
+          lowerStatus === "delivered" ? calculatedNetPayout : undefined,
       });
 
-      res.status(200).json({
+      // ---------------------------------------------------------
+      // 9. Respond to Steadfast
+      // ---------------------------------------------------------
+
+      return res.status(200).json({
         success: true,
+
         message: "Webhook processed successfully",
-        data: { consignmentId: consignment_id, calculatedNetPayout, mappedStatus },
+
+        data: {
+          notificationType: notification_type,
+          consignmentId: consignment_id,
+          invoice,
+          status,
+          calculatedNetPayout,
+          mappedStatus,
+        },
       });
     } catch (err) {
       console.error("Steadfast Webhook Error:", err);
+
       next(err);
     }
   },
